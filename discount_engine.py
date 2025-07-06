@@ -18,7 +18,7 @@ def segment_customers(df):
     # Ensure required columns exist (case-insensitive)
     required_columns = {
         'total_orders': ['total_orders', 'order_count', 'orders'],
-        'total_spent': ['total_spent', 'amount', 'total_amount'],
+        'total_spent': ['total_spent', 'amount', 'total_amount', 'total (₹)', 'total (rs)', 'total (inr)'],
         'last_order_date': ['last_order_date', 'last_order', 'order_date']
     }
     
@@ -46,12 +46,17 @@ def segment_customers(df):
     
     if not pd.api.types.is_numeric_dtype(df['total_spent']):
         df['total_spent'] = pd.to_numeric(
-            df['total_spent'].astype(str).str.replace('[^\d.]', '', regex=True),
+            df['total_spent'].astype(str).str.replace(r'[^\d.]', '', regex=True),
             errors='coerce'
         )
     
     if not pd.api.types.is_datetime64_any_dtype(df['last_order_date']):
         df['last_order_date'] = pd.to_datetime(df['last_order_date'], errors='coerce')
+    
+    # Fill missing values with defaults
+    df['total_orders'] = df['total_orders'].fillna(1)
+    df['total_spent'] = df['total_spent'].fillna(0)
+    df['last_order_date'] = df['last_order_date'].fillna(datetime.now())
     
     # Calculate days since last order
     current_date = datetime.now()
@@ -60,22 +65,44 @@ def segment_customers(df):
     # Initialize segment column
     df['segment'] = 'New'  # Default segment
     
-    # Apply segmentation rules
-    # VIP: 20+ orders, ₹5000+ spent
-    vip_mask = (df['total_orders'] >= 20) & (df['total_spent'] >= 5000)
+    # Apply segmentation rules based on spending and order patterns
+    # VIP: High spenders (₹5000+) or frequent customers (10+ orders with good spend)
+    vip_mask = (
+        (df['total_spent'] >= 5000) | 
+        ((df['total_orders'] >= 10) & (df['total_spent'] >= 2000))
+    )
     df.loc[vip_mask, 'segment'] = 'VIP'
     
-    # Regular: 10+ orders, ₹2000+ spent
-    regular_mask = (~vip_mask) & (df['total_orders'] >= 10) & (df['total_spent'] >= 2000)
+    # Regular: Medium spenders (₹2000+) or moderate customers (5+ orders with decent spend)
+    regular_mask = (
+        (~vip_mask) & 
+        ((df['total_spent'] >= 2000) | 
+         ((df['total_orders'] >= 5) & (df['total_spent'] >= 1000)))
+    )
     df.loc[regular_mask, 'segment'] = 'Regular'
     
-    # Occasional: 3+ orders, ₹500+ spent
-    occasional_mask = (~vip_mask & ~regular_mask) & (df['total_orders'] >= 3) & (df['total_spent'] >= 500)
+    # Occasional: Low to medium spenders (₹500+) or occasional customers
+    occasional_mask = (
+        (~vip_mask & ~regular_mask) & 
+        (df['total_spent'] >= 500)
+    )
     df.loc[occasional_mask, 'segment'] = 'Occasional'
     
-    # Lapsed: No orders in 14+ days (only for non-new customers)
-    lapsed_mask = (df['days_since_last_order'] >= 14) & (df['total_orders'] > 0)
+    # Lapsed: No orders in 14+ days (only for customers with some history)
+    lapsed_mask = (
+        (df['days_since_last_order'] >= 14) & 
+        (df['total_orders'] > 0) & 
+        (df['total_spent'] > 0)
+    )
     df.loc[lapsed_mask, 'segment'] = 'Lapsed'
+    
+    # New: Everyone else (low spend, few orders, recent activity)
+    new_mask = (
+        (df['total_spent'] < 500) & 
+        (df['total_orders'] <= 2) & 
+        (df['days_since_last_order'] < 14)
+    )
+    df.loc[new_mask, 'segment'] = 'New'
     
     return df
 
@@ -149,7 +176,7 @@ def generate_discounts(df):
             # Higher spenders get higher discounts (capped at max_discount)
             df.loc[mask, 'discount_pct'] = df.loc[mask].apply(
                 lambda row: min(
-                    rules['base_discount'] + (row['total_spent'] / 1000).astype(int),
+                    rules['base_discount'] + int(row['total_spent'] / 1000),
                     rules['max_discount']
                 ),
                 axis=1
