@@ -12,8 +12,14 @@ def segment_customers(df):
     Returns:
         pd.DataFrame: DataFrame with an additional 'segment' column
     """
+    import streamlit as st
+    
     # Make a copy to avoid modifying the original DataFrame
     df = df.copy()
+    
+    # Debug: Show input DataFrame info
+    st.write("Debug - Input DataFrame columns:", df.columns.tolist())
+    st.write("Debug - First row of data:", df.iloc[0].to_dict())
     
     # Ensure required columns exist (case-insensitive)
     required_columns = {
@@ -33,12 +39,18 @@ def segment_customers(df):
     # Check if all required columns are found
     missing_columns = [col for col in required_columns if col not in column_mapping]
     if missing_columns:
-        raise ValueError(f"Could not find required columns: {', '.join(missing_columns)}")
+        error_msg = f"Could not find required columns: {', '.join(missing_columns)}. Available columns: {df.columns.tolist()}"
+        st.error(error_msg)
+        raise ValueError(error_msg)
+    
+    # Debug: Show column mapping
+    st.write("Debug - Column mapping:", column_mapping)
     
     # Standardize column names
     for std_name, orig_name in column_mapping.items():
         if std_name != orig_name:
             df[std_name] = df[orig_name]
+            st.write(f"Debug - Mapped column '{orig_name}' to standard name '{std_name}'")
     
     # Convert data types if needed
     if not pd.api.types.is_numeric_dtype(df['total_orders']):

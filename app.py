@@ -42,27 +42,118 @@ def main():
             try:
                 # Load and process the uploaded file
                 df = load_excel_data(uploaded_file)
+                
+                # Store in session state
                 st.session_state.df = df
                 st.session_state.processed = False
                 
                 # Show data summary
                 st.success("File uploaded successfully!")
                 st.info(f"📊 Found {len(df)} customers")
-                st.info(f"💰 Total spend: ₹{df['total_spent'].sum():,.2f}")
-                st.info(f"📅 Date range: {df['last_order_date'].min().strftime('%Y-%m-%d')} to {df['last_order_date'].max().strftime('%Y-%m-%d')}")
                 
-                # Add processing button
+                try:
+                    st.info(f"💰 Total spend: ₹{df['total_spent'].sum():,.2f}")
+                    st.info(f"📅 Date range: {df['last_order_date'].min().strftime('%Y-%m-%d')} to {df['last_order_date'].max().strftime('%Y-%m-%d')}")
+                except Exception as e:
+                    st.error(f"Error calculating metrics: {str(e)}")
+                
+                # Add test processing button
+                if st.button("🔧 TEST: Process Sample Data"):
+                    try:
+                        from datetime import datetime, timedelta
+                        st.sidebar.info("Running test with sample data...")
+                        
+                        # Create a minimal test dataframe
+                        test_data = {
+                            'customer_name': ['Test Customer 1', 'Test Customer 2', 'Test Customer 3'],
+                            'phone': ['1234567890', '2345678901', '3456789012'],
+                            'total_spent': [1500, 500, 3000],
+                            'total_orders': [5, 2, 10],
+                            'last_order_date': [
+                                (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d'),
+                                (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d'),
+                                (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+                            ]
+                        }
+                        
+                        test_df = pd.DataFrame(test_data)
+                        st.sidebar.success("✅ Created test data")
+                        
+                        # Process the test data
+                        with st.spinner("Processing test data..."):
+                            st.sidebar.write("🔍 Testing segmentation...")
+                            segmented = segment_customers(test_df.copy())
+                            st.sidebar.success("✅ Segmentation successful")
+                            
+                            st.sidebar.write("💰 Generating discounts...")
+                            processed = generate_discounts(segmented)
+                            st.sidebar.success("✅ Discounts generated")
+                            
+                            # Store results
+                            st.session_state.df_processed = processed
+                            st.session_state.processed = True
+                            st.sidebar.success("✅ Results stored")
+                            
+                            # Force UI update
+                            st.rerun()
+                            
+                    except Exception as e:
+                        st.sidebar.error(f"❌ Test failed: {str(e)}")
+                        st.sidebar.exception(e)
+                
+                # Original processing button
                 if st.button("🚀 Process Data & Generate Discounts"):
+                    import time
+                    from datetime import datetime
+                    
+                    def log_debug(message):
+                        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                        st.sidebar.text(f"{timestamp} - {message}")
+                    
                     with st.spinner("Processing data and generating recommendations..."):
-                        # Apply segmentation
-                        df_segmented = segment_customers(df)
-                        # Generate discounts
-                        df_with_discounts = generate_discounts(df_segmented)
-                        # Store results in session state
-                        st.session_state.df_processed = df_with_discounts
-                        st.session_state.processed = True
-                        st.rerun()
-                
+                        try:
+                            log_debug("1. Starting data processing...")
+                            log_debug(f"2. DataFrame shape: {df.shape}")
+                            log_debug(f"3. DataFrame columns: {df.columns.tolist()}")
+                            log_debug(f"4. First row data: {df.iloc[0].to_dict() if len(df) > 0 else 'Empty DataFrame'}")
+                            
+                            # Apply segmentation
+                            log_debug("5. Starting customer segmentation...")
+                            start_time = time.time()
+                            df_segmented = segment_customers(df.copy())
+                            log_debug(f"6. Segmentation completed in {time.time() - start_time:.2f} seconds")
+                            log_debug(f"7. Segmented DataFrame shape: {df_segmented.shape}")
+                            
+                            # Check if 'segment' column was added
+                            if 'segment' not in df_segmented.columns:
+                                raise ValueError("Segmentation failed: 'segment' column not found in the output")
+                            
+                            # Generate discounts
+                            log_debug("8. Starting discount generation...")
+                            start_time = time.time()
+                            df_with_discounts = generate_discounts(df_segmented)
+                            log_debug(f"9. Discount generation completed in {time.time() - start_time:.2f} seconds")
+                            
+                            # Store results in session state
+                            st.session_state.df_processed = df_with_discounts
+                            st.session_state.processed = True
+                            log_debug("10. Results stored in session state")
+                            
+                            # Force a rerun to update the UI
+                            log_debug("11. Triggering UI update...")
+                            st.rerun()
+                            
+                        except Exception as e:
+                            log_debug(f"ERROR: {str(e)}")
+                            st.error(f"Error during processing: {str(e)}")
+                            st.error("Please check your data and try again. Make sure all required columns are present and contain valid data.")
+                            
+                            # Show detailed error information
+                            error_trace = traceback.format_exc()
+                            log_debug("Full error trace:")
+                            for line in error_trace.split('\n'):
+                                log_debug(line)
+            
             except Exception as e:
                 st.error(f"Error processing file: {str(e)}")
                 st.error("Please check your file format and try again.")
@@ -81,15 +172,46 @@ def main():
             with col3:
                 st.metric("Average Spend", f"₹{st.session_state.df['total_spent'].mean():,.2f}")
             
-            # Show data preview
-            st.dataframe(
-                st.session_state.df[['customer_name', 'phone', 'total_spent', 'total_orders', 'last_order_date']].head(10),
-                use_container_width=True
-            )
+            # Create tabs for different views
+            tab1, tab2 = st.tabs(["📊 Data Preview", "🎯 Discounts (After Processing)"])
             
-            st.info("💡 Click 'Process Data & Generate Discounts' in the sidebar to analyze your customers and create personalized discount campaigns.")
-        else:
+            with tab1:
+                # Show data preview in the first tab
+                st.dataframe(
+                    st.session_state.df[['customer_name', 'phone', 'total_spent', 'total_orders', 'last_order_date']].head(10),
+                    use_container_width=True
+                )
+                
+                st.info("💡 Click 'Process Data & Generate Discounts' in the sidebar to analyze your customers and create personalized discount campaigns.")
+                
+                # Show basic stats
+                st.subheader("📈 Quick Stats")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Customers", len(st.session_state.df))
+                with col2:
+                    st.metric("Total Revenue", f"₹{st.session_state.df['total_spent'].sum():,.2f}")
+                with col3:
+                    st.metric("Avg. Order Value", f"₹{st.session_state.df['total_spent'].mean():.2f}")
+                
+            # Initialize the second tab (will be empty until processing is done)
+            with tab2:
+                st.info("Process your data first to see discount recommendations here.")
+        
+        # Show processed results in the second tab if available
+        if 'df_processed' in st.session_state and st.session_state.processed:
+            with tab2:
+                display_results(st.session_state.df_processed)
+    
+    # If processing is complete, show results in the second tab
+    elif 'df_processed' in st.session_state and st.session_state.processed:
+        tab1, tab2 = st.tabs(["📊 Data Preview", "🎯 Discounts (After Processing)"])
+        with tab1:
+            st.info("Upload a file to see the data preview.")
+        with tab2:
             display_results(st.session_state.df_processed)
+    else:
+        st.info("📤 Please upload a file to get started.")
 
 def display_results(df):
     """Display the processed results and visualizations"""
